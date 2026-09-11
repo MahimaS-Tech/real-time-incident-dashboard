@@ -1,0 +1,78 @@
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=2
+      - --memory=2G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+      - --set
+      - redpanda.auto_create_topics_enabled=true
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "60", "10000"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  gateway:
+    build:
+      context: .
+      args:
+        SERVICE: gateway
+    environment:
+      PORT: "8080"
+      KAFKA_BROKERS: redpanda:9092
+      RAW_TOPIC: incidents.raw
+      GOMAXPROCS: "4"
+    depends_on:
+      - redpanda
+    ports:
+      - "8080:8080"
+
+  processor:
+    build:
+      context: .
+      args:
+        SERVICE: processor
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      RAW_TOPIC: incidents.raw
+      REDIS_ADDR: redis:6379
+      DEDUPE_TTL: 168h
+      GOMAXPROCS: "4"
+    depends_on:
+      - redpanda
+      - redis
+
+  dashboard:
+    build:
+      context: .
+      args:
+        SERVICE: dashboard
+    environment:
+      PORT: "8081"
+      REDIS_ADDR: redis:6379
+      STATIC_DIR: /web
+      GOMAXPROCS: "2"
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
+
+volumes:
+  redpanda-data:
+  redis-data:

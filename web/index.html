@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Incident Dashboard</title>
+  <style>
+    :root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f6f8fb; }
+    body { margin: 0; }
+    header { background: #111827; color: white; padding: 18px 28px; display: flex; justify-content: space-between; align-items: center; }
+    h1 { margin: 0; font-size: 22px; }
+    main { padding: 24px; }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .card { background: white; border-radius: 14px; padding: 18px; box-shadow: 0 1px 4px rgba(15,23,42,.08); }
+    .label { color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .value { font-size: 26px; margin-top: 8px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 4px rgba(15,23,42,.08); }
+    th, td { text-align: left; padding: 13px 14px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+    th { background: #f1f5f9; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .badge { border-radius: 999px; padding: 4px 10px; display: inline-block; font-weight: 700; font-size: 12px; }
+    .critical { background: #fee2e2; color: #991b1b; }
+    .warning { background: #fef3c7; color: #92400e; }
+    .info { background: #dbeafe; color: #1e40af; }
+    .resolved { background: #dcfce7; color: #166534; }
+    #conn { font-size: 13px; color: #a7f3d0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Real-Time Incident Management Dashboard</h1>
+    <div id="conn">connecting...</div>
+  </header>
+  <main>
+    <section class="cards">
+      <div class="card"><div class="label">Events</div><div class="value" id="events">0</div></div>
+      <div class="card"><div class="label">Open incidents</div><div class="value" id="open">0</div></div>
+      <div class="card"><div class="label">Critical</div><div class="value" id="critical">0</div></div>
+      <div class="card"><div class="label">Warning</div><div class="value" id="warning">0</div></div>
+    </section>
+    <table>
+      <thead>
+        <tr>
+          <th>Severity</th><th>Service</th><th>Region</th><th>Signal</th><th>Message</th><th>Count</th><th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody id="incidents"></tbody>
+    </table>
+  </main>
+  <script>
+    const state = new Map();
+    const tbody = document.getElementById('incidents');
+    const conn = document.getElementById('conn');
+
+    function cls(sev) { return ['critical','warning','info','resolved'].includes(sev) ? sev : 'info'; }
+    function renderRows() {
+      const rows = Array.from(state.values()).sort((a,b) => new Date(b.last_seen) - new Date(a.last_seen)).slice(0, 200);
+      tbody.innerHTML = rows.map(i => `<tr>
+        <td><span class="badge ${cls(i.severity)}">${i.severity}</span></td>
+        <td>${escapeHtml(i.service)}</td>
+        <td>${escapeHtml(i.region || '')}</td>
+        <td>${escapeHtml(i.signal)}</td>
+        <td>${escapeHtml(i.message)}</td>
+        <td>${i.count}</td>
+        <td>${new Date(i.last_seen).toLocaleString()}</td>
+      </tr>`).join('');
+    }
+    function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    async function loadInitial() {
+      const [incidents, metrics] = await Promise.all([
+        fetch('/v1/incidents?limit=200').then(r => r.json()),
+        fetch('/v1/metrics').then(r => r.json())
+      ]);
+      for (const i of incidents.incidents || []) state.set(i.id, i);
+      updateMetrics(metrics);
+      renderRows();
+    }
+    function updateMetrics(m) {
+      document.getElementById('events').textContent = m.events_total || 0;
+      document.getElementById('open').textContent = m.open_incidents || 0;
+      document.getElementById('critical').textContent = (m.by_severity && m.by_severity.critical) || 0;
+      document.getElementById('warning').textContent = (m.by_severity && m.by_severity.warning) || 0;
+    }
+    async function refreshMetrics() {
+      try { updateMetrics(await fetch('/v1/metrics').then(r => r.json())); } catch (_) {}
+    }
+    function connectWS() {
+      const events = new EventSource('/ws/incident-stream');
+      events.onopen = () => conn.textContent = 'live';
+      events.onerror = () => { conn.textContent = 'reconnecting...'; events.close(); setTimeout(connectWS, 1000); };
+      events.onmessage = ev => {
+        const incident = JSON.parse(ev.data);
+        state.set(incident.id, incident);
+        renderRows();
+        refreshMetrics();
+      };
+    }
+    loadInitial().then(connectWS);
+    setInterval(refreshMetrics, 5000);
+  </script>
+</body>
+</html>

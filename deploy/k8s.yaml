@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-gateway
+spec:
+  replicas: 20
+  selector:
+    matchLabels: { app: incident-gateway }
+  template:
+    metadata:
+      labels: { app: incident-gateway }
+    spec:
+      containers:
+        - name: gateway
+          image: your-registry/incident-gateway:latest
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: KAFKA_BROKERS, value: "redpanda-0:9092,redpanda-1:9092,redpanda-2:9092" }
+            - { name: RAW_TOPIC, value: "incidents.raw" }
+          resources:
+            requests: { cpu: "2", memory: "1Gi" }
+            limits: { cpu: "4", memory: "2Gi" }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: incident-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: incident-gateway
+  minReplicas: 20
+  maxReplicas: 150
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-gateway
+spec:
+  type: LoadBalancer
+  selector: { app: incident-gateway }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-processor
+spec:
+  replicas: 100
+  selector:
+    matchLabels: { app: incident-processor }
+  template:
+    metadata:
+      labels: { app: incident-processor }
+    spec:
+      containers:
+        - name: processor
+          image: your-registry/incident-processor:latest
+          env:
+            - { name: KAFKA_BROKERS, value: "redpanda-0:9092,redpanda-1:9092,redpanda-2:9092" }
+            - { name: RAW_TOPIC, value: "incidents.raw" }
+            - { name: REDIS_ADDR, value: "redis-cluster:6379" }
+          resources:
+            requests: { cpu: "2", memory: "1Gi" }
+            limits: { cpu: "4", memory: "2Gi" }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: incident-processor
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: incident-processor
+  minReplicas: 100
+  maxReplicas: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-dashboard
+spec:
+  replicas: 4
+  selector:
+    matchLabels: { app: incident-dashboard }
+  template:
+    metadata:
+      labels: { app: incident-dashboard }
+    spec:
+      containers:
+        - name: dashboard
+          image: your-registry/incident-dashboard:latest
+          ports: [{ containerPort: 8081 }]
+          env:
+            - { name: PORT, value: "8081" }
+            - { name: REDIS_ADDR, value: "redis-cluster:6379" }
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-dashboard
+spec:
+  type: LoadBalancer
+  selector: { app: incident-dashboard }
+  ports:
+    - port: 80
+      targetPort: 8081

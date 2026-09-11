@@ -1,0 +1,15 @@
+Command run in sandbox:
+
+  go test ./... -count=1
+
+Result:
+
+  PASS for all dependency-light unit test packages:
+  - pkg/model
+  - pkg/rules
+  - pkg/processor
+  - pkg/gateway
+  - pkg/dashboard
+
+Notes:
+  The production Kafka and Redis adapters are behind the `production` build tag and require downloading external Go modules in the target environment.
